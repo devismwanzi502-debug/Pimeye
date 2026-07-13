@@ -15,7 +15,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+# Define the template folder path
+template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'templates'))
+
+app = Flask(__name__, template_folder=template_dir)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-this-to-a-random-secret-key')
