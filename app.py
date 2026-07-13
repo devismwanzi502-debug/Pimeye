@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 import logging
 from dotenv import load_dotenv
 import urllib.parse
+import io
 
 load_dotenv()
 
@@ -30,11 +31,6 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 
-# Get API credentials
-FACEBOOK_ACCESS_TOKEN = os.getenv('FACEBOOK_ACCESS_TOKEN')
-FACEBOOK_USER_ID = os.getenv('FACEBOOK_USER_ID')
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -51,126 +47,133 @@ def get_image_hash(image_path):
         logger.error(f"Hash generation error: {e}")
         return None
 
-def search_google_images(image_data, image_url=None):
-    """Search Google Images for reverse image matches"""
+def get_image_url(filename):
+    """Get the URL for an uploaded image"""
+    base_url = os.getenv('BASE_URL', 'https://pimeye.onrender.com')
+    return f"{base_url}/uploads/{filename}"
+
+def search_google_images(image_filename):
+    """Generate Google Images reverse search URL"""
     results = []
     try:
-        # Create searchable URL for Google Images
-        if image_url:
-            # If we have a URL, use it directly
-            google_search_url = f"https://www.google.com/searchbyimage?image_url={urllib.parse.quote(image_url)}"
-        else:
-            # If we have image data, encode as base64 data URI
-            b64 = base64.b64encode(image_data).decode('utf-8')
-            google_search_url = f"https://lens.google.com/uploadbyimage"
+        # Get the image URL
+        image_url = get_image_url(image_filename)
+        
+        # Create Google Images reverse search URL
+        google_search_url = f"https://www.google.com/searchbyimage?image_url={urllib.parse.quote(image_url)}"
         
         results.append({
             'engine': 'Google Images',
             'url': google_search_url,
-            'redirect_url': google_search_url,
             'confidence': 95,
-            'description': 'Google Reverse Image Search - Find where images appear online',
+            'description': 'Click to search this image on Google Images',
             'source': 'Google',
             'icon': '🔍',
-            'type': 'google'
+            'type': 'google',
+            'status': 'Ready to search'
         })
-        logger.info("Google Images search URL generated")
+        logger.info(f"Google Images search URL generated: {google_search_url}")
         
     except Exception as e:
         logger.error(f"Google search error: {e}")
     
     return results
 
-def search_facebook_images(image_data):
-    """Search Facebook for similar images using Graph API"""
+def search_tineye_free(image_filename):
+    """Generate TinEye reverse search URL (no API key needed)"""
     results = []
     try:
-        if not FACEBOOK_ACCESS_TOKEN or not FACEBOOK_USER_ID:
-            logger.warning("Facebook credentials not configured")
-            results.append({
-                'engine': 'Facebook Image Search',
-                'url': 'https://www.facebook.com/search/photos/',
-                'redirect_url': 'https://www.facebook.com/search/photos/',
-                'confidence': 70,
-                'description': 'Facebook Photo Search - Search across Facebook photos',
-                'source': 'Facebook',
-                'icon': '📘',
-                'type': 'facebook',
-                'status': 'Requires Facebook login'
-            })
-            return results
+        # Get the image URL
+        image_url = get_image_url(image_filename)
         
-        # Try to use Facebook's search endpoint
-        url = f"https://graph.instagram.com/v18.0/{FACEBOOK_USER_ID}/media"
-        params = {
-            'fields': 'id,caption,media_type,media_url,timestamp',
-            'access_token': FACEBOOK_ACCESS_TOKEN,
-            'limit': 10
-        }
+        # Create TinEye reverse search URL
+        tineye_search_url = f"https://tineye.com/search?url={urllib.parse.quote(image_url)}"
         
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            facebook_search_url = f"https://www.facebook.com/search/photos/?q={urllib.parse.quote('image')}"
-            
-            results.append({
-                'engine': 'Facebook Image Search',
-                'url': facebook_search_url,
-                'redirect_url': facebook_search_url,
-                'confidence': 85,
-                'description': 'Facebook Photo Search - Connected via Graph API',
-                'source': 'Facebook',
-                'icon': '📘',
-                'type': 'facebook',
-                'status': 'Connected',
-                'posts_found': len(data.get('data', []))
-            })
-            logger.info(f"Facebook search successful - found {len(data.get('data', []))} posts")
-        else:
-            logger.warning(f"Facebook API response: {response.status_code}")
-            # Fallback to basic Facebook search
-            facebook_search_url = 'https://www.facebook.com/search/photos/'
-            results.append({
-                'engine': 'Facebook Image Search',
-                'url': facebook_search_url,
-                'redirect_url': facebook_search_url,
-                'confidence': 60,
-                'description': 'Facebook Photo Search - Fallback search',
-                'source': 'Facebook',
-                'icon': '📘',
-                'type': 'facebook',
-                'status': 'Fallback mode'
-            })
-        
-    except requests.exceptions.Timeout:
-        logger.error("Facebook API timeout")
         results.append({
-            'engine': 'Facebook Image Search',
-            'url': 'https://www.facebook.com/search/photos/',
-            'redirect_url': 'https://www.facebook.com/search/photos/',
-            'confidence': 50,
-            'description': 'Facebook Photo Search - Connection timeout',
-            'source': 'Facebook',
-            'icon': '📘',
-            'type': 'facebook',
-            'status': 'Timeout - try manual search'
+            'engine': 'TinEye',
+            'url': tineye_search_url,
+            'confidence': 90,
+            'description': 'Click to search this image on TinEye - finds where images appear online',
+            'source': 'TinEye',
+            'icon': '🎯',
+            'type': 'tineye',
+            'status': 'Ready to search'
         })
+        logger.info(f"TinEye search URL generated: {tineye_search_url}")
+        
     except Exception as e:
-        logger.error(f"Facebook search error: {e}")
-        results.append({
-            'engine': 'Facebook Image Search',
-            'url': 'https://www.facebook.com/search/photos/',
-            'redirect_url': 'https://www.facebook.com/search/photos/',
-            'confidence': 40,
-            'description': 'Facebook Photo Search',
-            'source': 'Facebook',
-            'icon': '📘',
-            'type': 'facebook',
-            'status': f'Error: {str(e)}'
-        })
+        logger.error(f"TinEye search error: {e}")
     
     return results
+
+def search_bing_images(image_filename):
+    """Generate Bing Images reverse search URL"""
+    results = []
+    try:
+        # Get the image URL
+        image_url = get_image_url(image_filename)
+        
+        # Create Bing Images reverse search URL
+        bing_search_url = f"https://www.bing.com/images/search?view=detailv2&iss=sbiupload&FORM=IRSBIQ&imgurl={urllib.parse.quote(image_url)}"
+        
+        results.append({
+            'engine': 'Bing Images',
+            'url': bing_search_url,
+            'confidence': 85,
+            'description': 'Click to search this image on Bing Images',
+            'source': 'Bing',
+            'icon': '🔎',
+            'type': 'bing',
+            'status': 'Ready to search'
+        })
+        logger.info(f"Bing Images search URL generated: {bing_search_url}")
+        
+    except Exception as e:
+        logger.error(f"Bing search error: {e}")
+    
+    return results
+
+def search_yandex_images(image_filename):
+    """Generate Yandex Images reverse search URL"""
+    results = []
+    try:
+        # Get the image URL
+        image_url = get_image_url(image_filename)
+        
+        # Create Yandex Images reverse search URL
+        yandex_search_url = f"https://yandex.com/images/search?rdrnd=1&url={urllib.parse.quote(image_url)}"
+        
+        results.append({
+            'engine': 'Yandex Images',
+            'url': yandex_search_url,
+            'confidence': 80,
+            'description': 'Click to search this image on Yandex Images',
+            'source': 'Yandex',
+            'icon': '🖼️',
+            'type': 'yandex',
+            'status': 'Ready to search'
+        })
+        logger.info(f"Yandex Images search URL generated: {yandex_search_url}")
+        
+    except Exception as e:
+        logger.error(f"Yandex search error: {e}")
+    
+    return results
+
+def get_image_info(filepath):
+    """Extract image information and metadata"""
+    try:
+        with Image.open(filepath) as img:
+            info = {
+                'format': img.format,
+                'mode': img.mode,
+                'size': f"{img.width} x {img.height}",
+                'dimensions': {'width': img.width, 'height': img.height}
+            }
+            return info
+    except Exception as e:
+        logger.error(f"Image info error: {e}")
+        return {}
 
 @app.route('/')
 def index():
@@ -200,27 +203,36 @@ def upload_image():
         with open(filepath, 'wb') as f:
             f.write(image_data)
         
-        # Get image hash for deduplication
+        # Get image hash and info
         image_hash = get_image_hash(filepath)
+        image_info = get_image_info(filepath)
         
         # Convert to base64 for preview
         img_b64 = base64.b64encode(image_data).decode('utf-8')
         
-        # Run searches - Google and Facebook only
+        # Run searches - Free providers only, no API keys needed
         results = []
         
-        # Search engines
-        results.extend(search_google_images(image_data))
-        results.extend(search_facebook_images(image_data))
+        # Add all free reverse image search engines
+        results.extend(search_google_images(filename))
+        results.extend(search_tineye_free(filename))
+        results.extend(search_bing_images(filename))
+        results.extend(search_yandex_images(filename))
         
-        return jsonify({
+        response = {
             'success': True,
             'preview': f"data:image/jpeg;base64,{img_b64}",
             'filename': filename,
             'image_hash': image_hash,
+            'image_info': image_info,
+            'image_url': get_image_url(filename),
             'results': results,
-            'total_results': len(results)
-        })
+            'total_results': len(results),
+            'message': f'Image uploaded successfully! {len(results)} search engines available'
+        }
+        
+        logger.info(f"Image uploaded: {filename} - {len(results)} searches available")
+        return jsonify(response)
         
     except Exception as e:
         logger.error(f"Upload processing error: {e}")
@@ -236,7 +248,7 @@ def search_by_url():
         return jsonify({'error': 'No URL provided'}), 400
     
     try:
-        # Download image from URL for preview and hashing
+        # Download image from URL for preview
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -247,7 +259,7 @@ def search_by_url():
         
         image_data = resp.content
         
-        # Process same as upload
+        # Save locally
         filename = secure_filename(f"url_{int(time.time())}.jpg")
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
@@ -255,21 +267,30 @@ def search_by_url():
             f.write(image_data)
         
         image_hash = get_image_hash(filepath)
+        image_info = get_image_info(filepath)
         img_b64 = base64.b64encode(image_data).decode('utf-8')
         
-        # Run searches - Google and Facebook only
+        # Run searches
         results = []
-        results.extend(search_google_images(image_data, image_url))
-        results.extend(search_facebook_images(image_data))
+        results.extend(search_google_images(filename))
+        results.extend(search_tineye_free(filename))
+        results.extend(search_bing_images(filename))
+        results.extend(search_yandex_images(filename))
         
-        return jsonify({
+        response = {
             'success': True,
             'preview': f"data:image/jpeg;base64,{img_b64}",
             'filename': filename,
             'image_hash': image_hash,
+            'image_info': image_info,
+            'image_url': get_image_url(filename),
             'results': results,
-            'total_results': len(results)
-        })
+            'total_results': len(results),
+            'message': f'Image from URL processed! {len(results)} search engines available'
+        }
+        
+        logger.info(f"URL image processed: {filename} - {len(results)} searches available")
+        return jsonify(response)
         
     except Exception as e:
         logger.error(f"URL search error: {e}")
@@ -277,7 +298,12 @@ def search_by_url():
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    """Serve uploaded images"""
+    try:
+        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    except Exception as e:
+        logger.error(f"File serve error: {e}")
+        return jsonify({'error': 'File not found'}), 404
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
